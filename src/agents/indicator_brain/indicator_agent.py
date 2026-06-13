@@ -20,8 +20,8 @@ def calculate_indicators(df, sma_window=14, rsi_window=14):
 
     df = df[~df.index.duplicated(keep='last')]
 
-    # Calculate Simple Moving Average (SMA)
-    df['SMA'] = df['Close'].rolling(window=sma_window).mean()
+    # Calculate Simple Moving Average (SMA) ratio
+    df['SMA'] = df['Close'] / df['Close'].rolling(window=sma_window).mean()
 
     # Calculate Relative Strength Index (RSI)
     delta = df['Close'].diff()
