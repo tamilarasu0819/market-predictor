@@ -13,15 +13,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from agents.data_fetcher.fetch_stock import fetch_stock_data
 from agents.indicator_brain.indicator_agent import calculate_indicators
 
-if __name__ == "__main__":
+def run_baseline_prediction(ticker, period='2y'):
+    """Fetches data, calculates indicators, and evaluates baseline accuracy for any given ticker."""
     print("===========================================")
-    print("      AI Predictor Agent Initialized       ")
+    print(f"      AI Predictor Agent: {ticker}         ")
     print("===========================================")
-
-    ticker = 'RELIANCE.NS'
-    period = '2y'
     
-    # 1. Fetch 2 years of data
+    # 1. Fetch data dynamically
     print(f"\nFetching {period} of data for {ticker}...")
     df = fetch_stock_data(ticker, period=period)
     
@@ -33,13 +31,9 @@ if __name__ == "__main__":
         if not df.empty:
             # 3. Create 'Target' column and drop NaNs
             print("Creating Target variable for prediction...")
-            # We use shift(-1) to look ahead to tomorrow's close
             df['Tomorrow_Close'] = df['Close'].shift(-1)
-            
-            # Drop rows with NaN values (specifically the last row which won't have a 'tomorrow')
             df.dropna(inplace=True)
             
-            # Target is 1 if tomorrow's Close > today's Close, else 0
             df['Target'] = np.where(df['Tomorrow_Close'] > df['Close'], 1, 0)
             
             # 4. Use 'SMA' and 'RSI' as features (X) and 'Target' as label (y)
@@ -64,7 +58,21 @@ if __name__ == "__main__":
             print(f"\nModel Evaluation complete!")
             print(f"Final Accuracy Score: {acc * 100:.2f}%")
             print("===========================================")
+            return acc
         else:
             print("\nNot enough data points after calculating indicators.")
+            return None
     else:
         print(f"\nCould not fetch valid data for {ticker}.")
+        return None
+
+if __name__ == "__main__":
+    # Check if a ticker was passed via the command line
+    if len(sys.argv) > 1:
+        target_ticker = sys.argv[1]
+    else:
+        # Fallback to Reliance if no argument is provided
+        print("No ticker provided in terminal. Defaulting to RELIANCE.NS")
+        target_ticker = 'RELIANCE.NS'
+        
+    run_baseline_prediction(target_ticker)
