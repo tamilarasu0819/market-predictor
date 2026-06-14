@@ -11,8 +11,7 @@ warnings.filterwarnings('ignore')
 MACRO_TICKERS = ['^NSEI', '^GSPC', '^IXIC', 'USO']
 
 def fetch_technical_data(ticker, period="2y"):
-    """Fetches target stock data and calculates local technical indicators."""
-    print(f"Fetching technical data for {ticker}...")
+    """Fetches target stock data and calculates local technical and microstructure indicators."""
     df = yf.download(ticker, period=period, progress=False)
     
     if isinstance(df.columns, pd.MultiIndex):
@@ -26,6 +25,11 @@ def fetch_technical_data(ticker, period="2y"):
     rs = gain / loss
     df['RSI_14'] = 100 - (100 / (1 + rs))
     
+    # Microstructure: Volume Dynamics calculated but conditionally used later
+    df['Volume_SMA_20'] = df['Volume'].rolling(window=20).mean()
+    df['Volume_SMA_20'] = df['Volume_SMA_20'].replace(0, np.nan).fillna(1)
+    df['Volume_Anomaly'] = df['Volume'] / df['Volume_SMA_20']
+    
     df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
     
     df.reset_index(inplace=True)
@@ -35,7 +39,6 @@ def fetch_technical_data(ticker, period="2y"):
 
 def fetch_macro_technicals(period="2y"):
     """Fetches historical daily returns for global macro indices."""
-    print("Fetching Global Macro Technicals...")
     df_macro = pd.DataFrame()
     
     for ticker in MACRO_TICKERS:
@@ -54,14 +57,13 @@ def fetch_macro_technicals(period="2y"):
                 df_macro = m_df
             else:
                 df_macro = pd.merge(df_macro, m_df, on='Date', how='outer')
-        except Exception as e:
-            print(f"Warning: Could not fetch {ticker} - {e}")
+        except Exception:
+            pass
             
     return df_macro
 
 def load_sentiment_data(filepath='sentiment_history.csv'):
     """Loads the cloud-scraped sentiment data from valid paths."""
-    print("Loading sentiment data...")
     if not os.path.exists(filepath) and os.path.exists('../../sentiment_history.csv'):
         filepath = '../../sentiment_history.csv'
     elif not os.path.exists(filepath) and os.path.exists('../sentiment_history.csv'):
@@ -73,13 +75,10 @@ def load_sentiment_data(filepath='sentiment_history.csv'):
         sent_df = sent_df.groupby(['Date', 'Ticker']).last().reset_index()
         return sent_df[['Date', 'Ticker', 'Weighted_Score', 'Polarized_Score']]
     except FileNotFoundError:
-        print(f"Warning: {filepath} not found!")
         return pd.DataFrame(columns=['Date', 'Ticker', 'Weighted_Score', 'Polarized_Score'])
 
 def prep_macro_sentiment(sent_df):
-    """Isolates sentiment scores for global indices safely, ensuring columns always exist."""
-    print("Processing global macro sentiment columns...")
-    
+    """Isolates sentiment scores for global indices safely."""
     if not sent_df.empty:
         df_macro_sent = pd.DataFrame({'Date': sent_df['Date'].unique()})
     else:
@@ -93,17 +92,13 @@ def prep_macro_sentiment(sent_df):
             m_sent = m_sent[['Date', 'Weighted_Score']].rename(columns={'Weighted_Score': col_name})
             df_macro_sent = pd.merge(df_macro_sent, m_sent, on='Date', how='outer')
         else:
-            # Force columns into existence even if the scraper hasn't saved rows for them yet
             df_macro_sent[col_name] = np.nan
             
     return df_macro_sent
 
 def run_master_prediction(ticker):
-    print("===========================================")
-    print("      MASTER PREDICTOR INITIALIZING        ")
-    print("===========================================\n")
+    print(f"\nRunning Engine for: {ticker}...")
 
-    # 1. Gather Data Streams
     tech_df = fetch_technical_data(ticker)
     macro_tech_df = fetch_macro_technicals()
     
@@ -111,30 +106,38 @@ def run_master_prediction(ticker):
     ticker_sent = sent_df[sent_df['Ticker'] == ticker][['Date', 'Weighted_Score', 'Polarized_Score']]
     macro_sent_df = prep_macro_sentiment(sent_df)
     
-    # 2. Complete Alignment & Merge
-    print(f"Merging Global Macro and Local Sentiment for {ticker}...")
     merged_df = pd.merge(tech_df, ticker_sent, on='Date', how='left')
     merged_df = pd.merge(merged_df, macro_tech_df, on='Date', how='left')
     merged_df = pd.merge(merged_df, macro_sent_df, on='Date', how='left')
     
-    # Fill target ticker sentiment indicators
     merged_df['Weighted_Score'] = merged_df['Weighted_Score'].fillna(0.0)
     merged_df['Polarized_Score'] = merged_df['Polarized_Score'].fillna(0.0)
     
-    # Fill macro sentiment columns explicitly
     for m in MACRO_TICKERS:
         col_name = f'{m}_Sentiment'
         if col_name in merged_df.columns:
             merged_df[col_name] = merged_df[col_name].fillna(0.0)
             
-    # Forward-fill market holidays across mixed exchanges, then wipe remaining NaN metrics
     merged_df = merged_df.ffill().fillna(0.0)
     
-    # 3. Dynamic Feature Allocation
+    # ---------------------------------------------------------
+    # THE LIQUIDITY GATE: DYNAMIC FEATURE ROUTING
+    # ---------------------------------------------------------
+    recent_turnover = (merged_df['Close'].iloc[-20:] * merged_df['Volume'].iloc[-20:]).mean()
+    LIQUIDITY_THRESHOLD = 6_000_000_000  # Tuned 6 Billion Turnover threshold
+    
     features = ['SMA_20', 'RSI_14', 'Weighted_Score', 'Polarized_Score']
+    
+    if recent_turnover < LIQUIDITY_THRESHOLD:
+        print(f" -> [SYSTEM] High-Beta/Mid-Cap Detected (Turnover: {recent_turnover:,.0f}). Engaging Volume Tracking.")
+        features.append('Volume_Anomaly')
+    else:
+        print(f" -> [SYSTEM] Mega-Cap Liquidity Detected (Turnover: {recent_turnover:,.0f}). Filtering volume noise.")
+    
     for m in MACRO_TICKERS:
         features.append(f'{m}_Return')
         features.append(f'{m}_Sentiment')
+    # ---------------------------------------------------------
         
     X = merged_df[features]
     y = merged_df['Target']
@@ -147,12 +150,9 @@ def run_master_prediction(ticker):
     X_train, X_test = X_historical.iloc[:split_index], X_historical.iloc[split_index:]
     y_train, y_test = y_historical.iloc[:split_index], y_historical.iloc[split_index:]
     
-    # 4. Fit Random Forest Matrix
-    print("\nTraining Global-Aware Random Forest Engine...")
     model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
     model.fit(X_train, y_train)
     
-    # 5. Evaluate Metrics
     test_predictions = model.predict(X_test)
     real_accuracy = accuracy_score(y_test, test_predictions) * 100
     
@@ -160,11 +160,14 @@ def run_master_prediction(ticker):
     live_prediction = model.predict(X_latest)[0]
     direction = "UP 🔼" if live_prediction == 1 else "DOWN 🔽"
     
-    print("\n===========================================")
-    print(f"Real Unseen Testing Accuracy: {real_accuracy:.2f}%")
-    print(f"Features used: {len(features)} Total (Macro + Micro)")
-    print(f"Prediction for {ticker} next open: {direction}")
-    print("===========================================")
+    print(f" -> Accuracy: {real_accuracy:.2f}% | Prediction: {direction}")
 
 if __name__ == "__main__":
-    run_master_prediction("TCS.NS")
+    print("===========================================")
+    print("     DYNAMIC HYBRID ROUTING ENGINE TEST    ")
+    print("===========================================")
+    
+    test_universe = ["TCS.NS", "RELIANCE.NS", "ETERNAL.NS", "SUZLON.NS", "IREDA.NS"]
+    for t in test_universe:
+        run_master_prediction(t)
+    print("\n===========================================")
