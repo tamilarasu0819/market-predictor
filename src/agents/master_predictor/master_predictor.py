@@ -8,7 +8,8 @@ import os
 
 warnings.filterwarnings('ignore')
 
-MACRO_TICKERS = ['^NSEI', '^GSPC', '^IXIC', 'USO']
+# The Complete Macro Universe: Local, Global, Commodity, and Volatility (Fear)
+MACRO_TICKERS = ['^NSEI', '^GSPC', '^IXIC', 'USO', '^VIX', '^INDIAVIX']
 
 def fetch_technical_data(ticker, period="2y"):
     """Fetches target stock data and calculates local technical and microstructure indicators."""
@@ -25,7 +26,7 @@ def fetch_technical_data(ticker, period="2y"):
     rs = gain / loss
     df['RSI_14'] = 100 - (100 / (1 + rs))
     
-    # Microstructure: Volume Dynamics calculated but conditionally used later
+    # Microstructure: Volume Dynamics
     df['Volume_SMA_20'] = df['Volume'].rolling(window=20).mean()
     df['Volume_SMA_20'] = df['Volume_SMA_20'].replace(0, np.nan).fillna(1)
     df['Volume_Anomaly'] = df['Volume'] / df['Volume_SMA_20']
@@ -38,7 +39,7 @@ def fetch_technical_data(ticker, period="2y"):
     return df.dropna()
 
 def fetch_macro_technicals(period="2y"):
-    """Fetches historical daily returns for global macro indices."""
+    """Fetches historical daily returns for global macro and volatility indices."""
     df_macro = pd.DataFrame()
     
     for ticker in MACRO_TICKERS:
@@ -124,7 +125,7 @@ def run_master_prediction(ticker):
     # THE LIQUIDITY GATE: DYNAMIC FEATURE ROUTING
     # ---------------------------------------------------------
     recent_turnover = (merged_df['Close'].iloc[-20:] * merged_df['Volume'].iloc[-20:]).mean()
-    LIQUIDITY_THRESHOLD = 6_000_000_000  # Tuned 6 Billion Turnover threshold
+    LIQUIDITY_THRESHOLD = 6_000_000_000  
     
     features = ['SMA_20', 'RSI_14', 'Weighted_Score', 'Polarized_Score']
     
@@ -164,7 +165,7 @@ def run_master_prediction(ticker):
 
 if __name__ == "__main__":
     print("===========================================")
-    print("     DYNAMIC HYBRID ROUTING ENGINE TEST    ")
+    print("     FULL MACRO-AWARE PREDICTION ENGINE    ")
     print("===========================================")
     
     test_universe = ["TCS.NS", "RELIANCE.NS", "ETERNAL.NS", "SUZLON.NS", "IREDA.NS"]
