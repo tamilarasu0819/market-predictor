@@ -2,8 +2,8 @@ name: Daily Sentiment Scraper
 
 on:
   schedule:
-    # Runs at 02:30 UTC (which is exactly 8:00 AM IST) every single day
-    - cron: '30 2 * * *'
+    # Runs at 02:37 UTC (which is exactly 8:07 AM IST) every single day
+    - cron: '37 2 * * *'
   workflow_dispatch:
 
 jobs:
