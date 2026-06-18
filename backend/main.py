@@ -11,7 +11,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,6 +26,7 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
             return {"error": f"Failed to generate prediction data for {ticker}"}
 
         # --- Inject real-time OHLCV via yfinance ---
+        historical_prices = []
         current_price = None
         open_price    = None
         high_price    = None
@@ -33,7 +34,7 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
         volume        = None
         try:
             stock = yf.Ticker(ticker)
-            hist  = stock.history(period="1d")
+            hist  = stock.history(period="1mo")
             if not hist.empty:
                 last = hist.iloc[-1]
                 current_price = round(float(last["Close"]),  2)
@@ -41,6 +42,12 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
                 high_price    = round(float(last["High"]),   2)
                 low_price     = round(float(last["Low"]),    2)
                 volume        = int(last["Volume"])
+                
+                for date, row in hist.iterrows():
+                    historical_prices.append({
+                        "date": date.strftime("%b %d"),
+                        "price": round(float(row["Close"]), 2)
+                    })
         except Exception as price_err:
             print(f"[WARN] Could not fetch live OHLCV for {ticker}: {price_err}")
 
@@ -49,6 +56,7 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
         result["high"]          = high_price
         result["low"]           = low_price
         result["volume"]        = volume
+        result["historical_prices"] = historical_prices
 
         return result
     except Exception as e:

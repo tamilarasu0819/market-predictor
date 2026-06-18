@@ -12,6 +12,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
 
 interface PredictionData {
   ticker: string;
@@ -26,6 +27,7 @@ interface PredictionData {
   high: number | null;
   low: number | null;
   volume: number | null;
+  historical_prices: { date: string; price: number }[];
 }
 
 function formatIndian(n: number | null): string {
@@ -42,7 +44,7 @@ function formatVolume(v: number | null): string {
 
 export default function TradingDashboard() {
   const [ticker, setTicker] = useState("TCS.NS");
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PredictionData | null>(null);
 
@@ -50,7 +52,7 @@ export default function TradingDashboard() {
     e.preventDefault();
     if (!ticker.trim()) return;
 
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
 
     try {
@@ -71,7 +73,7 @@ export default function TradingDashboard() {
       setError(msg);
       setData(null);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -143,10 +145,10 @@ export default function TradingDashboard() {
             <button
               id="predict-btn"
               type="submit"
-              disabled={loading}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium px-6 py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
+              disabled={isLoading}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-6 py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              {loading ? (
+              {isLoading ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Analyzing Market...
@@ -170,7 +172,7 @@ export default function TradingDashboard() {
         )}
 
         {/* Results */}
-        {data && !loading && (
+        {data && !isLoading && (
           <div className="flex flex-col gap-6">
             {/* Row 1 — Signal Overview + Price Reference */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -259,8 +261,50 @@ export default function TradingDashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Row 3 — Historical Price Chart */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-md mt-6">
+              <h2 className="text-lg font-medium text-slate-400 mb-6">30-Day Price History</h2>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={data.historical_prices}>
+                    <XAxis 
+                      dataKey="date" 
+                      stroke="#64748b" 
+                      fontSize={12} 
+                      tickLine={false} 
+                      axisLine={false} 
+                    />
+                    <YAxis 
+                      domain={['auto', 'auto']} 
+                      stroke="#64748b" 
+                      fontSize={12} 
+                      tickLine={false} 
+                      axisLine={false} 
+                      tickFormatter={(value) => `${currencySymbol}${value}`}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }}
+                      itemStyle={{ color: '#34d399' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="price" 
+                      stroke="#34d399" 
+                      strokeWidth={2} 
+                      dot={false} 
+                      activeDot={{ r: 6, fill: '#34d399' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
         )}
+        {/* Legal Disclaimer */}
+        <footer className="text-xs text-gray-500 mt-12 text-center pb-8">
+          Not Financial Advice. This dashboard is a technical demonstration for educational purposes only. Machine learning models carry inherent margins of error, and past performance does not guarantee future results.
+        </footer>
       </div>
     </main>
   );
