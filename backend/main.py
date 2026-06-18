@@ -18,7 +18,10 @@ app.add_middleware(
 )
 
 @app.get("/predict")
-def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symbol (e.g., TCS.NS)")):
+def get_stock_prediction(
+    ticker: str = Query(..., description="Stock ticker symbol (e.g., TCS.NS)"),
+    period: str = Query("1mo", description="Historical data period (1wk, 1mo, 3mo, 1y)")
+):
     try:
         ticker = ticker.upper().strip()
         result = run_master_prediction(ticker)
@@ -34,7 +37,7 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
         volume        = None
         try:
             stock = yf.Ticker(ticker)
-            hist  = stock.history(period="1mo")
+            hist  = stock.history(period=period)
             if not hist.empty:
                 last = hist.iloc[-1]
                 current_price = round(float(last["Close"]),  2)
@@ -45,8 +48,11 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
                 
                 for date, row in hist.iterrows():
                     historical_prices.append({
-                        "date": date.strftime("%b %d"),
-                        "price": round(float(row["Close"]), 2)
+                        "time": date.strftime("%Y-%m-%d"),
+                        "open": round(float(row["Open"]), 2),
+                        "high": round(float(row["High"]), 2),
+                        "low": round(float(row["Low"]), 2),
+                        "close": round(float(row["Close"]), 2)
                     })
         except Exception as price_err:
             print(f"[WARN] Could not fetch live OHLCV for {ticker}: {price_err}")

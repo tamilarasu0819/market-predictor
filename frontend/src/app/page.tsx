@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   TrendingUp,
   TrendingDown,
@@ -12,7 +12,15 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
+import { createChart, CandlestickSeries } from "lightweight-charts";
+
+interface HistoricalPrice {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
 
 interface PredictionData {
   ticker: string;
@@ -27,15 +35,17 @@ interface PredictionData {
   high: number | null;
   low: number | null;
   volume: number | null;
-  historical_prices: { date: string; price: number }[];
+  historical_prices: HistoricalPrice[];
 }
 
-function formatIndian(n: number | null): string {
+type Theme = 'slate' | 'glossy-blue' | 'pitch-black' | 'light';
+
+function formatIndian(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
-function formatVolume(v: number | null): string {
+function formatVolume(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(2) + "M";
   if (v >= 1_000) return (v / 1_000).toFixed(1) + "K";
@@ -44,21 +54,25 @@ function formatVolume(v: number | null): string {
 
 export default function TradingDashboard() {
   const [ticker, setTicker] = useState("TCS.NS");
+  const [timeframe, setTimeframe] = useState("1mo");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PredictionData | null>(null);
+  const [theme, setTheme] = useState<Theme>('slate');
 
-  const handlePredict = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ticker.trim()) return;
+  // Dynamic state to capture whatever candle the user is currently hovering over
+  const [hoveredCandle, setHoveredCandle] = useState<HistoricalPrice | null>(null);
 
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+
+  const fetchPrediction = async (fetchTicker: string, fetchPeriod: string) => {
+    if (!fetchTicker.trim()) return;
     setIsLoading(true);
     setError(null);
-
     try {
-      // Connects to FastAPI backend on port 8002
       const response = await fetch(
-        `http://localhost:8002/predict?ticker=${ticker.toUpperCase().trim()}`
+        `http://localhost:8002/predict?ticker=${fetchTicker.toUpperCase().trim()}&period=${fetchPeriod}`
       );
       if (!response.ok) {
         throw new Error("Failed to fetch prediction. Please check the ticker symbol.");
@@ -68,6 +82,7 @@ export default function TradingDashboard() {
         throw new Error(result.error);
       }
       setData(result);
+      setHoveredCandle(null); // Clear any old hover states
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
       setError(msg);
@@ -77,234 +92,469 @@ export default function TradingDashboard() {
     }
   };
 
+  const handlePredict = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await fetchPrediction(ticker, timeframe);
+  };
+
+  const handleTimeframeChange = (newPeriod: string) => {
+    setTimeframe(newPeriod);
+    if (data) fetchPrediction(ticker, newPeriod);
+  };
+
+  useEffect(() => {
+    if (!chartContainerRef.current || !data?.historical_prices || data.historical_prices.length === 0) return;
+
+    // Initialize Chart with enhanced visual configurations for crosshairs
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: 'solid' as any, color: 'transparent' },
+        textColor: theme === 'light' ? '#111827' : '#cbd5e1',
+      },
+      grid: {
+        vertLines: { color: theme === 'light' ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.03)' },
+        horzLines: { color: theme === 'light' ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.03)' },
+      },
+      crosshair: {
+        mode: 1, // Normal crosshair mode tracking mouse movements
+        vertLine: {
+          labelBackgroundColor: theme === 'light' ? '#4b5563' : '#1e293b',
+        },
+        horzLine: {
+          labelBackgroundColor: theme === 'light' ? '#4b5563' : '#1e293b',
+        }
+      },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      rightPriceScale: {
+        borderVisible: false,
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: 400,
+    });
+
+    chartRef.current = chart;
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#34d399',
+      downColor: '#f87171',
+      borderVisible: false,
+      wickUpColor: '#34d399',
+      wickDownColor: '#f87171',
+    });
+
+    candleSeries.setData(data.historical_prices as any);
+
+    // Dynamic tracking: list for mouse movements to fetch metrics from the active candle
+    chart.subscribeCrosshairMove((param) => {
+      if (
+        param.time &&
+        param.seriesData &&
+        param.seriesData.has(candleSeries)
+      ) {
+        const seriesData = param.seriesData.get(candleSeries) as any;
+        if (seriesData) {
+          setHoveredCandle({
+            time: param.time.toString(),
+            open: seriesData.open,
+            high: seriesData.high,
+            low: seriesData.low,
+            close: seriesData.close,
+          });
+        }
+      } else {
+        // If the cursor leaves the chart area, revert back to displaying global summary metrics
+        setHoveredCandle(null);
+      }
+    });
+
+    // Make the chart fully responsive to container adjustments
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    // Auto-fit the data nicely into the screen frame on load
+    chart.timeScale().fitContent();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+      chartRef.current = null;
+    };
+    // Recreate chart when data changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.historical_prices]);
+
+  // Apply dynamic chart options when theme changes
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({
+        layout: {
+          textColor: theme === 'light' ? '#111827' : '#cbd5e1',
+        },
+        grid: {
+          vertLines: { color: theme === 'light' ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.03)' },
+          horzLines: { color: theme === 'light' ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.03)' },
+        },
+        crosshair: {
+          vertLine: { labelBackgroundColor: theme === 'light' ? '#4b5563' : '#1e293b' },
+          horzLine: { labelBackgroundColor: theme === 'light' ? '#4b5563' : '#1e293b' },
+        }
+      });
+    }
+  }, [theme]);
+
   const predictionColor =
     data?.direction === "UP"
-      ? "text-emerald-400"
+      ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]"
       : data?.direction === "DOWN"
-      ? "text-red-400"
-      : "text-amber-400";
+        ? "text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.8)]"
+        : "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]";
 
   const barColor =
     data?.direction === "UP"
       ? "bg-emerald-500"
       : data?.direction === "DOWN"
-      ? "bg-red-500"
-      : "bg-amber-400";
+        ? "bg-red-500"
+        : "bg-amber-400";
 
   const iconBg =
     data?.direction === "UP"
-      ? "bg-emerald-950/50 text-emerald-400 border border-emerald-900/30"
+      ? theme === 'light' ? "bg-emerald-100 text-emerald-600 border border-emerald-200" : "bg-emerald-950/50 text-emerald-400 border border-emerald-900/30"
       : data?.direction === "DOWN"
-      ? "bg-red-950/50 text-red-400 border border-red-900/30"
-      : "bg-amber-950/50 text-amber-400 border border-amber-900/30";
+        ? theme === 'light' ? "bg-red-100 text-red-600 border border-red-200" : "bg-red-950/50 text-red-400 border border-red-900/30"
+        : theme === 'light' ? "bg-amber-100 text-amber-600 border border-amber-200" : "bg-amber-950/50 text-amber-400 border border-amber-900/30";
 
   const PredictionIcon =
     data?.direction === "UP"
       ? TrendingUp
       : data?.direction === "DOWN"
-      ? TrendingDown
-      : Minus;
+        ? TrendingDown
+        : Minus;
 
   const currencySymbol =
     data?.ticker?.endsWith(".NS") || data?.ticker?.endsWith(".BO") ? "₹" : "$";
 
-  const ohlcvStats = data
-    ? [
-        { label: "Open",   value: `${currencySymbol}${formatIndian(data.open)}`,   icon: BarChart2 },
-        { label: "High",   value: `${currencySymbol}${formatIndian(data.high)}`,   icon: ArrowUp   },
-        { label: "Low",    value: `${currencySymbol}${formatIndian(data.low)}`,    icon: ArrowDown  },
-        { label: "Volume", value: formatVolume(data.volume),                        icon: BarChart2 },
-      ]
-    : [];
+  // Dynamic selection: show hovered details if mouse is inside the chart, else fall back to active summary
+  const displayOpen = hoveredCandle ? hoveredCandle.open : data?.open;
+  const displayHigh = hoveredCandle ? hoveredCandle.high : data?.high;
+  const displayLow = hoveredCandle ? hoveredCandle.low : data?.low;
+  const displayClose = hoveredCandle ? hoveredCandle.close : data?.current_price;
+
+  const getThemeClasses = () => {
+    switch (theme) {
+      case 'glossy-blue':
+        return {
+          main: "bg-blue-950 text-blue-50",
+          card: "bg-blue-900/30 backdrop-blur-md border-blue-400/20 text-blue-50 shadow-2xl rounded-2xl",
+          textPrimary: "text-blue-50",
+          textSecondary: "text-blue-300",
+          textMuted: "text-blue-400",
+          input: "bg-blue-950/50 border-blue-400/30 text-blue-50 placeholder-blue-400/50",
+          orb1: "bg-blue-500/20",
+          orb2: "bg-cyan-500/20",
+          button: "bg-blue-600/80 hover:bg-blue-500/80 border-blue-500/30 text-white",
+          emptyState: "bg-blue-900/20 border-blue-400/20",
+          timeframeBg: "bg-blue-950/50 border-blue-400/20",
+          timeframeActive: "bg-blue-700 text-white border-blue-400/30",
+          timeframeInactive: "text-blue-400 hover:text-blue-200 hover:bg-blue-800/50",
+          border: "border-blue-400/20",
+          themeSelectorBg: "bg-blue-900/50 border-blue-400/20",
+        };
+      case 'pitch-black':
+        return {
+          main: "bg-black text-gray-100",
+          card: "bg-[#111] border-[#333] text-gray-100 border rounded-none",
+          textPrimary: "text-gray-100",
+          textSecondary: "text-gray-400",
+          textMuted: "text-gray-500",
+          input: "bg-black border-[#444] text-gray-100 placeholder-gray-500 rounded-none",
+          orb1: "hidden",
+          orb2: "hidden",
+          button: "bg-[#333] hover:bg-[#444] border-[#555] text-white rounded-none",
+          emptyState: "bg-[#111] border-[#333]",
+          timeframeBg: "bg-black border-[#333] rounded-none",
+          timeframeActive: "bg-[#444] text-white border-[#555] rounded-none",
+          timeframeInactive: "text-gray-400 hover:text-gray-200 hover:bg-[#222] rounded-none",
+          border: "border-[#333]",
+          themeSelectorBg: "bg-[#111] border-[#333] rounded-none",
+        };
+      case 'light':
+        return {
+          main: "bg-gray-50 text-gray-900",
+          card: "bg-white border-gray-200 shadow-lg text-gray-900 border rounded-2xl",
+          textPrimary: "text-gray-900",
+          textSecondary: "text-gray-500",
+          textMuted: "text-gray-400",
+          input: "bg-white border-gray-300 text-gray-900 placeholder-gray-400 focus:border-emerald-500",
+          orb1: "hidden",
+          orb2: "hidden",
+          button: "bg-emerald-600 hover:bg-emerald-700 border-transparent text-white",
+          emptyState: "bg-gray-100 border-gray-300",
+          timeframeBg: "bg-gray-100 border-gray-200",
+          timeframeActive: "bg-white text-gray-900 shadow-sm border border-gray-200",
+          timeframeInactive: "text-gray-500 hover:text-gray-700 hover:bg-gray-100",
+          border: "border-gray-200",
+          themeSelectorBg: "bg-white border-gray-200 shadow-sm",
+        };
+      case 'slate':
+      default:
+        return {
+          main: "bg-slate-950 text-slate-50",
+          card: "bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-2xl rounded-2xl",
+          textPrimary: "text-slate-100",
+          textSecondary: "text-slate-400",
+          textMuted: "text-slate-500",
+          input: "bg-black/20 border-white/5 text-slate-100 placeholder-slate-500",
+          orb1: "bg-emerald-900/20",
+          orb2: "bg-cyan-900/20",
+          button: "bg-emerald-600/80 hover:bg-emerald-500/80 border-emerald-500/30 text-white",
+          emptyState: "bg-slate-900/20 border-white/10",
+          timeframeBg: "bg-black/40 border-white/10",
+          timeframeActive: "bg-slate-700/80 text-white border-white/10",
+          timeframeInactive: "text-slate-500 hover:text-slate-300 hover:bg-white/5",
+          border: "border-white/10",
+          themeSelectorBg: "bg-black/20 border-white/10 backdrop-blur-md",
+        };
+    }
+  };
+
+  const tc = getThemeClasses();
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 p-6 flex flex-col items-center">
-      <div className="w-full max-w-4xl mt-8">
-        {/* Header */}
-        <header className="mb-8 text-center md:text-left">
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-            ML Stock Predictor Dashboard
-          </h1>
-          <p className="text-slate-400 mt-1">Random Forest Intelligence Architecture</p>
-        </header>
-
-        {/* Search Control */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8 shadow-md">
-          <form onSubmit={handlePredict} className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3.5 h-5 w-5 text-slate-500" />
-              <input
-                type="text"
-                id="ticker-input"
-                placeholder="Enter Ticker (e.g., TCS.NS, RELIANCE.NS, AAPL)"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-11 pr-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
-              />
+    <main className={`relative min-h-screen p-4 sm:p-6 lg:p-8 flex justify-center overflow-hidden transition-colors duration-500 ${tc.main}`}>
+      {/* Background Orbs */}
+      <div className={`fixed top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full blur-[120px] pointer-events-none transition-colors duration-500 ${tc.orb1}`} />
+      <div className={`fixed bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full blur-[120px] pointer-events-none transition-colors duration-500 ${tc.orb2}`} />
+      
+      <div className="relative w-full max-w-7xl z-10 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* LEFT SIDEBAR */}
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          {/* Header & Theme Selector */}
+          <header className="mb-2 flex flex-col sm:flex-row justify-between items-center sm:items-start gap-4">
+            <div className="text-center sm:text-left">
+              <h1 className={`text-3xl lg:text-4xl font-extrabold tracking-tight ${theme === 'light' ? 'bg-gradient-to-r from-emerald-600 to-cyan-600' : 'bg-gradient-to-r from-emerald-400 to-cyan-400'} bg-clip-text text-transparent drop-shadow-sm`}>
+                ML Stock Predictor
+              </h1>
+              <p className={`${tc.textSecondary} mt-1 text-sm font-medium`}>Random Forest Intelligence Architecture</p>
             </div>
-            <button
-              id="predict-btn"
-              type="submit"
-              disabled={isLoading}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-6 py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Analyzing Market...
-                </>
-              ) : (
-                "Generate Prediction"
+            
+            {/* Theme Selector */}
+            <div className={`flex items-center gap-2 rounded-full p-1.5 border ${tc.themeSelectorBg}`}>
+              <button onClick={() => setTheme('slate')} className={`w-5 h-5 rounded-full bg-slate-800 border-2 transition-colors ${theme === 'slate' ? 'border-emerald-400 scale-110' : 'border-transparent hover:scale-105'}`} title="Slate Theme" />
+              <button onClick={() => setTheme('glossy-blue')} className={`w-5 h-5 rounded-full bg-blue-800 border-2 transition-colors ${theme === 'glossy-blue' ? 'border-emerald-400 scale-110' : 'border-transparent hover:scale-105'}`} title="Glossy Blue Theme" />
+              <button onClick={() => setTheme('pitch-black')} className={`w-5 h-5 rounded-full bg-black border-2 transition-colors ${theme === 'pitch-black' ? 'border-emerald-400 scale-110' : 'border-[#333] hover:scale-105'}`} title="Pitch Black Theme" />
+              <button onClick={() => setTheme('light')} className={`w-5 h-5 rounded-full bg-gray-200 border-2 transition-colors ${theme === 'light' ? 'border-emerald-500 scale-110' : 'border-gray-300 hover:scale-105'}`} title="Light Theme" />
+            </div>
+          </header>
+
+          {/* Search Control */}
+          <div className={tc.card}>
+            <form onSubmit={handlePredict} className="flex flex-col gap-4">
+              <div className="relative">
+                <Search className={`absolute left-3 top-3.5 h-5 w-5 ${tc.textMuted}`} />
+                <input
+                  type="text"
+                  id="ticker-input"
+                  placeholder="Enter Ticker (e.g., TCS.NS)"
+                  value={ticker}
+                  onChange={(e) => setTicker(e.target.value)}
+                  className={`w-full rounded-xl pl-11 pr-4 py-3 focus:outline-none transition-colors shadow-inner border ${tc.input}`}
+                />
+              </div>
+              <button
+                id="predict-btn"
+                type="submit"
+                disabled={isLoading}
+                className={`w-full font-semibold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 border disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.4)] ${tc.button}`}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Analyzing Market...
+                  </>
+                ) : (
+                  "Generate Prediction"
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* Error State */}
+          {error && (
+            <div className={`backdrop-blur-xl border rounded-2xl p-4 flex items-start gap-3 shadow-2xl ${theme === 'light' ? 'bg-red-50 border-red-200 text-red-600' : 'bg-red-950/40 border-red-900/50 text-red-400'}`}>
+              <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="font-semibold">Engine Error</h3>
+                <p className="text-sm opacity-90">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Signal Overview (Only if data) */}
+          {data && !isLoading && (
+            <div className={`flex-1 flex flex-col ${tc.card} p-6`}>
+              <h2 className={`text-lg font-medium mb-4 ${tc.textSecondary}`}>
+                Signal Overview: <span className={tc.textPrimary}>{data.ticker}</span>
+              </h2>
+
+              <div className="flex items-center gap-4 mb-6">
+                <div className={`p-4 rounded-xl backdrop-blur-md ${iconBg}`}>
+                  <PredictionIcon className="h-8 w-8" />
+                </div>
+                <div>
+                  <div className={`text-sm font-medium tracking-wide uppercase ${tc.textSecondary}`}>
+                    Model Forecast
+                  </div>
+                  <div className={`text-2xl font-bold ${predictionColor}`}>
+                    Market Trend {data.direction}
+                  </div>
+                  <div className={`text-xs mt-1 ${tc.textMuted}`}>
+                    {data.signal_strength} signal · {data.accuracy}% accuracy
+                  </div>
+                </div>
+              </div>
+
+              {/* Confidence bar */}
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <span className={`text-sm font-medium ${tc.textSecondary}`}>Algorithmic Confidence</span>
+                  <span className={`text-sm font-bold ${tc.textPrimary}`}>
+                    {data.confidence.toFixed(2)}%
+                  </span>
+                </div>
+                <div className={`w-full rounded-full h-3 overflow-hidden border shadow-inner ${theme === 'light' ? 'bg-gray-200 border-gray-300' : 'bg-black/40 border-white/5'}`}>
+                  <div
+                    className={`h-full transition-all duration-700 rounded-full ${barColor}`}
+                    style={{ width: `${data.confidence}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Top signals chips */}
+              {data.top_signals?.length > 0 && (
+                <div className="mt-auto flex flex-wrap gap-2">
+                  {data.top_signals.map((sig) => (
+                    <span
+                      key={sig}
+                      className={`text-xs px-3 py-1.5 rounded-full shadow-sm border ${theme === 'light' ? 'bg-gray-100 border-gray-200 text-gray-700' : 'bg-white/5 backdrop-blur-md text-slate-300 border-white/10'}`}
+                    >
+                      {sig}
+                    </span>
+                  ))}
+                </div>
               )}
-            </button>
-          </form>
+            </div>
+          )}
+          
+          {/* Disclaimer on Sidebar bottom */}
+          <footer className={`text-xs text-center mt-auto pt-6 pb-2 ${tc.textMuted}`}>
+            Not Financial Advice. This dashboard is a technical demonstration for educational purposes only. Machine learning models carry inherent margins of error.
+          </footer>
         </div>
 
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-950/30 border border-red-900/50 rounded-xl p-4 mb-8 flex items-start gap-3 text-red-400">
-            <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="font-semibold">Engine Error</h3>
-              <p className="text-sm opacity-90">{error}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Results */}
-        {data && !isLoading && (
-          <div className="flex flex-col gap-6">
-            {/* Row 1 — Signal Overview + Price Reference */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Signal card (2 cols) */}
-              <div className="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-md">
-                <h2 className="text-lg font-medium text-slate-400 mb-4">
-                  Signal Overview: <span className="text-slate-200">{data.ticker}</span>
-                </h2>
-
-                <div className="flex items-center gap-4 mb-6">
-                  <div className={`p-4 rounded-xl ${iconBg}`}>
-                    <PredictionIcon className="h-8 w-8" />
-                  </div>
+        {/* MAIN DISPLAY */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {data && !isLoading ? (
+            <>
+              {/* Row 1: Price Reference (Top) */}
+              <div className={`${tc.card} p-6`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
                   <div>
-                    <div className="text-sm text-slate-500 font-medium tracking-wide uppercase">
-                      Model Forecast
+                    <h2 className={`text-lg font-medium mb-2 ${tc.textSecondary}`}>
+                      {hoveredCandle ? "Selected Close" : "Last Close"}
+                    </h2>
+                    <div className={`text-xs font-medium uppercase tracking-wide ${tc.textSecondary}`}>
+                      {hoveredCandle ? `Date: ${hoveredCandle.time}` : "Active Frame Track"}
                     </div>
-                    <div className={`text-2xl font-bold ${predictionColor}`}>
-                      Market Trend {data.direction}
+                    <div className={`text-4xl lg:text-5xl font-extrabold mt-2 tracking-tight ${tc.textPrimary}`}>
+                      {displayClose !== null ? `${currencySymbol}${formatIndian(displayClose)}` : "—"}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      {data.signal_strength} signal · {data.accuracy}% back-test accuracy
-                    </div>
+                  </div>
+                  <div className={`text-xs text-left sm:text-right max-w-xs ${tc.textMuted}`}>
+                    {hoveredCandle ? "Displaying metrics for specific inspected frame node." : "Data generated via active FastAPI pipeline execution."}
                   </div>
                 </div>
+              </div>
 
-                {/* Confidence bar */}
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-medium text-slate-400">Algorithmic Confidence</span>
-                    <span className="text-sm font-bold text-slate-200">
-                      {data.confidence.toFixed(2)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-950 rounded-full h-3 overflow-hidden border border-slate-800">
-                    <div
-                      className={`h-full transition-all duration-700 rounded-full ${barColor}`}
-                      style={{ width: `${data.confidence}%` }}
-                    />
-                  </div>
+              {/* Row 2: OHLCV Stats Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className={`${tc.card} p-5 flex flex-col gap-1.5`}>
+                  <span className={`text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 ${tc.textSecondary}`}>
+                    <BarChart2 className={`h-4 w-4 ${tc.textMuted}`} /> Open
+                  </span>
+                  <span className={`text-xl font-bold ${tc.textPrimary}`}>{currencySymbol}{formatIndian(displayOpen)}</span>
                 </div>
 
-                {/* Top signals chips */}
-                {data.top_signals?.length > 0 && (
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {data.top_signals.map((sig) => (
-                      <span
-                        key={sig}
-                        className="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-3 py-1 rounded-full"
+                <div className={`${tc.card} p-5 flex flex-col gap-1.5`}>
+                  <span className={`text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 ${tc.textSecondary}`}>
+                    <ArrowUp className="h-4 w-4 text-emerald-500" /> High
+                  </span>
+                  <span className={`text-xl font-bold ${tc.textPrimary}`}>{currencySymbol}{formatIndian(displayHigh)}</span>
+                </div>
+
+                <div className={`${tc.card} p-5 flex flex-col gap-1.5`}>
+                  <span className={`text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 ${tc.textSecondary}`}>
+                    <ArrowDown className="h-4 w-4 text-red-500" /> Low
+                  </span>
+                  <span className={`text-xl font-bold ${tc.textPrimary}`}>{currencySymbol}{formatIndian(displayLow)}</span>
+                </div>
+
+                <div className={`${tc.card} p-5 flex flex-col gap-1.5`}>
+                  <span className={`text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 ${tc.textSecondary}`}>
+                    <BarChart2 className={`h-4 w-4 ${tc.textMuted}`} /> Volume
+                  </span>
+                  <span className={`text-xl font-bold ${tc.textPrimary}`}>{formatVolume(data?.volume)}</span>
+                </div>
+              </div>
+
+              {/* Row 3: Historical Price Chart */}
+              <div className={`${tc.card} p-6 flex-1 flex flex-col min-h-[500px]`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                  <div>
+                    <h2 className={`text-lg font-bold ${tc.textPrimary}`}>Price History</h2>
+                    <p className={`text-xs mt-0.5 ${tc.textSecondary}`}>Move cursor over candles to track precise OHLC coordinates</p>
+                  </div>
+                  
+                  {/* Segmented Timeframe Control */}
+                  <div className={`flex rounded-xl p-1 border shadow-inner ${tc.timeframeBg}`}>
+                    {["1wk", "1mo", "3mo", "1y"].map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => handleTimeframeChange(t)}
+                        className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all duration-300 ${timeframe === t
+                            ? `${tc.timeframeActive} shadow-md border`
+                            : tc.timeframeInactive
+                          }`}
                       >
-                        {sig}
-                      </span>
+                        {t.toUpperCase()}
+                      </button>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Price card (1 col) */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-md flex flex-col justify-between">
-                <div>
-                  <h2 className="text-lg font-medium text-slate-400 mb-4">Price Reference</h2>
-                  <div className="text-sm text-slate-500 font-medium uppercase tracking-wide">
-                    Last Closing Price
-                  </div>
-                  <div className="text-3xl font-extrabold text-slate-100 mt-1">
-                    {data.current_price !== null ? `${currencySymbol}${formatIndian(data.current_price)}` : "—"}
-                  </div>
                 </div>
-                <div className="pt-4 border-t border-slate-800 mt-4 text-xs text-slate-500">
-                  Data generated by processing indicators via active FastAPI pipeline execution.
-                </div>
+                {/* Chart Container */}
+                <div className={`flex-1 w-full cursor-crosshair rounded-xl overflow-hidden border ${tc.border}`} ref={chartContainerRef} />
               </div>
-            </div>
-
-            {/* Row 2 — OHLCV Stats Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {ohlcvStats.map(({ label, value }) => (
-                <div
-                  key={label}
-                  className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-1"
-                >
-                  <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    {label}
-                  </span>
-                  <span className="text-lg font-bold text-slate-100">{value}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Row 3 — Historical Price Chart */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-md mt-6">
-              <h2 className="text-lg font-medium text-slate-400 mb-6">30-Day Price History</h2>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data.historical_prices}>
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#64748b" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                    />
-                    <YAxis 
-                      domain={['auto', 'auto']} 
-                      stroke="#64748b" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                      tickFormatter={(value) => `${currencySymbol}${value}`}
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }}
-                      itemStyle={{ color: '#34d399' }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="price" 
-                      stroke="#34d399" 
-                      strokeWidth={2} 
-                      dot={false} 
-                      activeDot={{ r: 6, fill: '#34d399' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+            </>
+          ) : (
+            // Empty State
+            <div className={`flex-1 flex flex-col items-center justify-center border border-dashed rounded-2xl min-h-[400px] ${tc.emptyState}`}>
+              <div className={`p-6 rounded-full mb-4 shadow-lg border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/5'}`}>
+                <Search className={`h-10 w-10 ${tc.textMuted}`} />
               </div>
+              <p className={`font-medium text-lg ${tc.textSecondary}`}>Awaiting Engine Input</p>
+              <p className={`text-sm mt-2 ${tc.textMuted}`}>Enter a ticker in the sidebar to generate prediction metrics.</p>
             </div>
-          </div>
-        )}
-        {/* Legal Disclaimer */}
-        <footer className="text-xs text-gray-500 mt-12 text-center pb-8">
-          Not Financial Advice. This dashboard is a technical demonstration for educational purposes only. Machine learning models carry inherent margins of error, and past performance does not guarantee future results.
-        </footer>
+          )}
+        </div>
       </div>
     </main>
   );
