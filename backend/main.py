@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import sys
 import os
+import yfinance as yf
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from master_predictor import run_master_prediction
@@ -10,7 +11,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,6 +24,32 @@ def get_stock_prediction(ticker: str = Query(..., description="Stock ticker symb
         result = run_master_prediction(ticker)
         if not result:
             return {"error": f"Failed to generate prediction data for {ticker}"}
+
+        # --- Inject real-time OHLCV via yfinance ---
+        current_price = None
+        open_price    = None
+        high_price    = None
+        low_price     = None
+        volume        = None
+        try:
+            stock = yf.Ticker(ticker)
+            hist  = stock.history(period="1d")
+            if not hist.empty:
+                last = hist.iloc[-1]
+                current_price = round(float(last["Close"]),  2)
+                open_price    = round(float(last["Open"]),   2)
+                high_price    = round(float(last["High"]),   2)
+                low_price     = round(float(last["Low"]),    2)
+                volume        = int(last["Volume"])
+        except Exception as price_err:
+            print(f"[WARN] Could not fetch live OHLCV for {ticker}: {price_err}")
+
+        result["current_price"] = current_price
+        result["open"]          = open_price
+        result["high"]          = high_price
+        result["low"]           = low_price
+        result["volume"]        = volume
+
         return result
     except Exception as e:
         return {"error": str(e)}

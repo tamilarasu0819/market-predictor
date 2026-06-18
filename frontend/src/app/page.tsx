@@ -15,7 +15,7 @@ import {
 
 interface PredictionData {
   ticker: string;
-  prediction: "UP" | "DOWN" | "NEUTRAL";
+  direction: "UP" | "DOWN" | "NEUTRAL";
   signal_strength: string;
   confidence: number;
   accuracy: number;
@@ -54,6 +54,7 @@ export default function TradingDashboard() {
     setError(null);
 
     try {
+      // Connects to FastAPI backend on port 8000
       const response = await fetch(
         `http://localhost:8000/predict?ticker=${ticker.toUpperCase().trim()}`
       );
@@ -75,30 +76,30 @@ export default function TradingDashboard() {
   };
 
   const predictionColor =
-    data?.prediction === "UP"
+    data?.direction === "UP"
       ? "text-emerald-400"
-      : data?.prediction === "DOWN"
+      : data?.direction === "DOWN"
       ? "text-red-400"
       : "text-amber-400";
 
   const barColor =
-    data?.prediction === "UP"
+    data?.direction === "UP"
       ? "bg-emerald-500"
-      : data?.prediction === "DOWN"
+      : data?.direction === "DOWN"
       ? "bg-red-500"
       : "bg-amber-400";
 
   const iconBg =
-    data?.prediction === "UP"
+    data?.direction === "UP"
       ? "bg-emerald-950/50 text-emerald-400 border border-emerald-900/30"
-      : data?.prediction === "DOWN"
+      : data?.direction === "DOWN"
       ? "bg-red-950/50 text-red-400 border border-red-900/30"
       : "bg-amber-950/50 text-amber-400 border border-amber-900/30";
 
   const PredictionIcon =
-    data?.prediction === "UP"
+    data?.direction === "UP"
       ? TrendingUp
-      : data?.prediction === "DOWN"
+      : data?.direction === "DOWN"
       ? TrendingDown
       : Minus;
 
@@ -185,7 +186,7 @@ export default function TradingDashboard() {
                       Model Forecast
                     </div>
                     <div className={`text-2xl font-bold ${predictionColor}`}>
-                      Market Trend {data.prediction}
+                      Market Trend {data.direction}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
                       {data.signal_strength} signal · {data.accuracy}% back-test accuracy
