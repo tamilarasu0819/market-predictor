@@ -60,6 +60,12 @@ export default function TradingDashboard() {
   const [data, setData] = useState<PredictionData | null>(null);
   const [theme, setTheme] = useState<Theme>('slate');
 
+  // Search autocomplete state
+  const [suggestions, setSuggestions] = useState<{symbol: string, shortname: string}[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
   // Dynamic state to capture whatever candle the user is currently hovering over
   const [hoveredCandle, setHoveredCandle] = useState<HistoricalPrice | null>(null);
 
@@ -101,6 +107,42 @@ export default function TradingDashboard() {
     setTimeframe(newPeriod);
     if (data) fetchPrediction(ticker, newPeriod);
   };
+
+  // Debounce logic for autocomplete
+  useEffect(() => {
+    if (ticker.trim().length > 1) {
+      const timeoutId = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+          const res = await fetch(`http://localhost:8002/search?query=${ticker}`);
+          if (res.ok) {
+            const result = await res.json();
+            setSuggestions(result);
+            setShowDropdown(true);
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 300);
+      return () => clearTimeout(timeoutId);
+    } else {
+      setSuggestions([]);
+      setShowDropdown(false);
+    }
+  }, [ticker]);
+
+  // Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (!chartContainerRef.current || !data?.historical_prices || data.historical_prices.length === 0) return;
@@ -359,16 +401,53 @@ export default function TradingDashboard() {
           {/* Search Control */}
           <div className={tc.card}>
             <form onSubmit={handlePredict} className="flex flex-col gap-4">
-              <div className="relative">
+              <div className="relative" ref={searchContainerRef}>
                 <Search className={`absolute left-3 top-3.5 h-5 w-5 ${tc.textMuted}`} />
                 <input
                   type="text"
                   id="ticker-input"
                   placeholder="Enter Ticker (e.g., TCS.NS)"
                   value={ticker}
-                  onChange={(e) => setTicker(e.target.value)}
+                  onChange={(e) => {
+                    setTicker(e.target.value);
+                    setShowDropdown(true);
+                  }}
+                  onFocus={() => {
+                    if (suggestions.length > 0) setShowDropdown(true);
+                  }}
                   className={`w-full rounded-xl pl-11 pr-4 py-3 focus:outline-none transition-colors shadow-inner border ${tc.input}`}
+                  autoComplete="off"
                 />
+                
+                {/* Autocomplete Dropdown */}
+                {showDropdown && suggestions.length > 0 && (
+                  <ul className={`absolute w-full mt-2 rounded-xl shadow-2xl z-50 overflow-hidden border backdrop-blur-xl ${
+                    theme === 'light' ? 'bg-white/90 border-gray-200' : 
+                    theme === 'pitch-black' ? 'bg-[#111] border-[#333]' : 
+                    theme === 'glossy-blue' ? 'bg-blue-900/90 border-blue-400/20' : 
+                    'bg-slate-900/90 border-white/10'
+                  }`}>
+                    {suggestions.map((s, idx) => (
+                      <li
+                        key={idx}
+                        className={`px-4 py-3 cursor-pointer transition-colors border-b last:border-b-0 ${
+                          theme === 'light' ? 'border-gray-100 hover:bg-gray-50' : 
+                          theme === 'pitch-black' ? 'border-[#222] hover:bg-[#222]' : 
+                          theme === 'glossy-blue' ? 'border-blue-800/30 hover:bg-blue-800/50' : 
+                          'border-slate-800/50 hover:bg-slate-800/50'
+                        }`}
+                        onClick={() => {
+                          setTicker(s.symbol);
+                          setShowDropdown(false);
+                          fetchPrediction(s.symbol, timeframe);
+                        }}
+                      >
+                        <div className={`font-bold ${tc.textPrimary}`}>{s.symbol}</div>
+                        <div className={`text-xs truncate ${tc.textSecondary}`}>{s.shortname}</div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <button
                 id="predict-btn"

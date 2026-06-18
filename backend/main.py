@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import sys
 import os
+import requests
 import yfinance as yf
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +17,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/search")
+def search_tickers(query: str = Query(..., description="Search query for ticker symbol")):
+    try:
+        if not query or len(query) < 1:
+            return []
+            
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=6&newsCount=0"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        quotes = data.get("quotes", [])
+        
+        results = []
+        for q in quotes:
+            # Check if it's an equity or similar instrument that has a symbol
+            if "symbol" in q:
+                results.append({
+                    "symbol": q.get("symbol"),
+                    "shortname": q.get("shortname", q.get("longname", q.get("symbol")))
+                })
+                
+        return results
+    except Exception as e:
+        print(f"[WARN] Search error: {e}")
+        return []
 
 @app.get("/predict")
 def get_stock_prediction(
