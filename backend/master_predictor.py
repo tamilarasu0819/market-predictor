@@ -8,7 +8,7 @@ import os
 
 warnings.filterwarnings('ignore')
 
-CONFIDENCE_THRESHOLD = 0.65
+CONFIDENCE_THRESHOLD = 0.52
 MACRO_TICKERS = ['^NSEI', '^GSPC', '^IXIC', 'USO', '^VIX', '^INDIAVIX']
 
 INDUSTRY_TO_INDEX_MAP = {
@@ -246,11 +246,11 @@ def run_master_prediction(ticker):
     live_prob = final_model.predict_proba(X_latest_pruned)[0][1]
     market_coverage = len(X_test) / len(X_historical_pruned) * 100
 
-    if live_prob >= CONFIDENCE_THRESHOLD:
+    if live_prob > 0.52:
         direction = "UP"
         signal_type = "Strong"
         confidence_display = live_prob * 100
-    elif live_prob <= (1 - CONFIDENCE_THRESHOLD):
+    elif live_prob < 0.48:
         direction = "DOWN"
         signal_type = "Strong"
         confidence_display = (1 - live_prob) * 100

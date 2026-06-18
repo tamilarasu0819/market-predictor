@@ -54,9 +54,9 @@ export default function TradingDashboard() {
     setError(null);
 
     try {
-      // Connects to FastAPI backend on port 8000
+      // Connects to FastAPI backend on port 8002
       const response = await fetch(
-        `http://localhost:8000/predict?ticker=${ticker.toUpperCase().trim()}`
+        `http://localhost:8002/predict?ticker=${ticker.toUpperCase().trim()}`
       );
       if (!response.ok) {
         throw new Error("Failed to fetch prediction. Please check the ticker symbol.");
@@ -103,12 +103,15 @@ export default function TradingDashboard() {
       ? TrendingDown
       : Minus;
 
+  const currencySymbol =
+    data?.ticker?.endsWith(".NS") || data?.ticker?.endsWith(".BO") ? "₹" : "$";
+
   const ohlcvStats = data
     ? [
-        { label: "Open",   value: `₹${formatIndian(data.open)}`,   icon: BarChart2 },
-        { label: "High",   value: `₹${formatIndian(data.high)}`,   icon: ArrowUp   },
-        { label: "Low",    value: `₹${formatIndian(data.low)}`,    icon: ArrowDown  },
-        { label: "Volume", value: formatVolume(data.volume),        icon: BarChart2 },
+        { label: "Open",   value: `${currencySymbol}${formatIndian(data.open)}`,   icon: BarChart2 },
+        { label: "High",   value: `${currencySymbol}${formatIndian(data.high)}`,   icon: ArrowUp   },
+        { label: "Low",    value: `${currencySymbol}${formatIndian(data.low)}`,    icon: ArrowDown  },
+        { label: "Volume", value: formatVolume(data.volume),                        icon: BarChart2 },
       ]
     : [];
 
@@ -233,7 +236,7 @@ export default function TradingDashboard() {
                     Last Closing Price
                   </div>
                   <div className="text-3xl font-extrabold text-slate-100 mt-1">
-                    {data.current_price !== null ? `₹${formatIndian(data.current_price)}` : "—"}
+                    {data.current_price !== null ? `${currencySymbol}${formatIndian(data.current_price)}` : "—"}
                   </div>
                 </div>
                 <div className="pt-4 border-t border-slate-800 mt-4 text-xs text-slate-500">
