@@ -597,7 +597,8 @@ export default function TradingDashboard() {
           
           {/* Disclaimer on Sidebar bottom */}
           <footer className={`text-xs text-center mt-auto pt-6 pb-2 ${tc.textMuted}`}>
-            Not Financial Advice. This dashboard is a technical demonstration for educational purposes only. Machine learning models carry inherent margins of error.
+            <p>Not Financial Advice. This dashboard is a technical demonstration for educational purposes only. Machine learning models carry inherent margins of error.</p>
+            <div className="text-center text-slate-500 text-xs mt-4">© 2026 S.Tamilarasu</div>
           </footer>
         </div>
 
