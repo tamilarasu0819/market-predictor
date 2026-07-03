@@ -89,7 +89,7 @@ export default function TradingDashboard() {
     setError(null);
     try {
       const response = await fetch(
-        `http://localhost:8002/predict?ticker=${fetchTicker.toUpperCase().trim()}&period=${fetchPeriod}`
+        `https://market-predictor-okjq.onrender.com/predict?ticker=${fetchTicker.toUpperCase().trim()}&period=${fetchPeriod}`
       );
       if (!response.ok) {
         throw new Error("Failed to fetch prediction. Please check the ticker symbol.");
@@ -133,7 +133,7 @@ export default function TradingDashboard() {
       const timeoutId = setTimeout(async () => {
         setIsSearching(true);
         try {
-          const res = await fetch(`http://localhost:8002/search?query=${ticker}`);
+          const res = await fetch(`https://market-predictor-okjq.onrender.com/search?query=${ticker}`);
           if (res.ok) {
             const result = await res.json();
             setSuggestions(result);
